@@ -1,88 +1,84 @@
-const nodeMailer = require('nodemailer');
-const email = require('../config/email');
-const { google } = require("googleapis");
-const OAuth2 = google.auth.OAuth2;
+const nodeMailer = require("nodemailer");
+const email = require("../config/email");
 
+// Transporter SMTP (Gmail + App Password)
 const createTransporter = async () => {
-  const oauth2Client = new OAuth2(
-    process.env.CLIENT_ID,
-    process.env.CLIENT_SECRET,
-    "https://developers.google.com/oauthplayground"
-  );
-
-  oauth2Client.setCredentials({
-    refresh_token: process.env.REFRESH_TOKEN
-  });
-
-  const accessToken = await new Promise((resolve, reject) => {
-    oauth2Client.getAccessToken((err, token) => {
-      if (err) {
-        reject("Failed to create access token :(");
-      }
-      resolve(token);
-    });
-  });
-
   const transporter = nodeMailer.createTransport({
-    service: "gmail",
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT) || 587,
+    secure: process.env.SMTP_SECURE === "true",
     auth: {
-      type: "OAuth2",
-      user: process.env.EMAIL,
-      accessToken,
-      clientId: process.env.CLIENT_ID,
-      clientSecret: process.env.CLIENT_SECRET,
-      refreshToken: process.env.REFRESH_TOKEN
-    }
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
   });
 
   return transporter;
 };
+
 module.exports = {
   /**
    * @description send email
-   * @param {*} to type string - "bar@example.com, baz@example.com" list of receivers
-   * @param {*} subject type string - Subject line
-   * @param {*} type type string - "formcontact"
-   * @param {*} content type OBJECT - content of email
-   * 
+   * @param {string} to        - destinatario
+   * @param {string} subject   - asunto
+   * @param {string} type      - "confirm" | "formcontact"
+   * @param {object} content   - datos del mail
+   * @param {string} typeEmail - "information" | "user"
    */
   sendEmail: async (to, subject, type, content, typeEmail) => {
     try {
-      let emailTransporter = await createTransporter();
-      let mailOptions = {
-        to: to,
-        subject: subject,
-        html: email[type]({ email: to, tokenEmail : content.tokenEmail}, typeEmail)
-      }
-      await emailTransporter.sendMail(mailOptions);
-      return { err: false, data:'mail sent' }
+      const emailTransporter = await createTransporter();
+
+      const fullContent = {
+        ...content,
+        email: content.email || to,
+      };
+
+      const html = email[type](fullContent, typeEmail);
+
+      const mailOptions = {
+        from: `"Braganza Vial" <${process.env.EMAIL}>`,
+        to,
+        subject,
+        html,
+      };
+
+      const info = await emailTransporter.sendMail(mailOptions);
+      console.log("Email sent:", info.messageId);
+
+      return { err: false, data: "mail sent" };
     } catch (error) {
-      return { err: true, data: error }
+      console.error("Error sending email:", error);
+      return { err: true, data: error.message || error };
     }
   },
-  /**
-   * @description send email dinos lo que quieres
-   * @param {*} body
-   */
+
   sendEmailSuggestion: async (body, file) => {
     try {
-      let emailTransporter = await createTransporter();
-      let mailOptions = {
+      const emailTransporter = await createTransporter();
+
+      const mailOptions = {
         to: process.env.EMAIL,
-        from: `"${body.email}" <from@example.com>`,
-        subject: 'Dinos lo que quieres',
+        from: `"${body.email}" <${process.env.EMAIL}>`,
+        replyTo: body.email,
+        subject: "Dinos lo que quieres",
         text: body.message,
-      }
+      };
+
       if (file) {
-        mailOptions.attachments = [{
-          filename: file.originalname,
-          content: Buffer.from(file.buffer.toString('base64'),'base64')
-        }]
+        mailOptions.attachments = [
+          {
+            filename: file.originalname,
+            content: Buffer.from(file.buffer.toString("base64"), "base64"),
+          },
+        ];
       }
+
       await emailTransporter.sendMail(mailOptions);
-      return { err: false, data:'mail sent' }
+      return { err: false, data: "mail sent" };
     } catch (error) {
-      return { err: true, data: error }
+      console.error("Error sending suggestion email:", error);
+      return { err: true, data: error.message || error };
     }
-  }
-}
+  },
+};
