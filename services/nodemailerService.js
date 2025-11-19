@@ -1,24 +1,32 @@
-const nodeMailer = require("nodemailer");
-const email = require("../config/email");
+const sgMail = require("@sendgrid/mail");
+const emailTemplates = require("../config/email");
 
-// Transporter SMTP (Gmail + App Password)
-const createTransporter = async () => {
-  const transporter = nodeMailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT) || 587,
-    secure: process.env.SMTP_SECURE === "true",
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
-  });
+sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
-  return transporter;
-};
+/**
+ * @param {object} options
+ * @param {string} options.to
+ * @param {string} options.subject
+ * @param {string} options.html
+ */
+async function sendViaSendGrid({ to, subject, html }) {
+  const msg = {
+    to,
+    from: process.env.EMAIL_FROM || process.env.EMAIL,
+    subject,
+    html,
+  };
+
+  const [response] = await sgMail.send(msg);
+  return {
+    statusCode: response.statusCode,
+    headers: response.headers,
+  };
+}
 
 module.exports = {
   /**
-   * @description send email
+   * @description send email genérico
    * @param {string} to        - destinatario
    * @param {string} subject   - asunto
    * @param {string} type      - "confirm" | "formcontact"
@@ -27,55 +35,53 @@ module.exports = {
    */
   sendEmail: async (to, subject, type, content, typeEmail) => {
     try {
-      const emailTransporter = await createTransporter();
-
       const fullContent = {
         ...content,
         email: content.email || to,
       };
 
-      const html = email[type](fullContent, typeEmail);
+      const html = emailTemplates[type](fullContent, typeEmail);
 
-      const mailOptions = {
-        from: `"Braganza Vial" <${process.env.EMAIL}>`,
-        to,
-        subject,
-        html,
-      };
+      const data = await sendViaSendGrid({ to, subject, html });
 
-      const info = await emailTransporter.sendMail(mailOptions);
-      console.log("Email sent:", info.messageId);
-
-      return { err: false, data: "mail sent" };
+      return { err: false, data };
     } catch (error) {
       console.error("Error sending email:", error);
       return { err: true, data: error.message || error };
     }
   },
 
+  /**
+   * @description send email "Dinos lo que quieres"
+   * @param {*} body
+   * @param {*} file (por ahora sin adjuntos, se puede agregar luego)
+   */
   sendEmailSuggestion: async (body, file) => {
     try {
-      const emailTransporter = await createTransporter();
+      const html = `
+        <p>Mensaje desde el formulario "Dinos lo que quieres":</p>
+        <p><strong>De:</strong> ${body.email}</p>
+        <p><strong>Mensaje:</strong></p>
+        <p>${body.message}</p>
+      `;
 
-      const mailOptions = {
+      const msg = {
         to: process.env.EMAIL,
-        from: `"${body.email}" <${process.env.EMAIL}>`,
+        from: process.env.EMAIL_FROM || process.env.EMAIL,
         replyTo: body.email,
         subject: "Dinos lo que quieres",
-        text: body.message,
+        html,
       };
 
-      if (file) {
-        mailOptions.attachments = [
-          {
-            filename: file.originalname,
-            content: Buffer.from(file.buffer.toString("base64"), "base64"),
-          },
-        ];
-      }
+      const [response] = await sgMail.send(msg);
 
-      await emailTransporter.sendMail(mailOptions);
-      return { err: false, data: "mail sent" };
+      return {
+        err: false,
+        data: {
+          statusCode: response.statusCode,
+          headers: response.headers,
+        },
+      };
     } catch (error) {
       console.error("Error sending suggestion email:", error);
       return { err: true, data: error.message || error };
